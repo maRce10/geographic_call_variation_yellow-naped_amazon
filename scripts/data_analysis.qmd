@@ -1,0 +1,441 @@
+---
+title: Geographic call variation in yellow-naped amazon across its entire geographic range
+subtitle: Statistical analysis
+author: <a href="http://marceloarayasalas.weebly.com/">Marcelo Araya-Salas, PhD</a>
+date: "`r Sys.Date()`"
+toc: true
+toc-depth: 2
+toc-location: left
+number-sections: true
+highlight-style: pygments
+format:
+  html:
+    df-print: kable
+    code-fold: true
+    code-tools: true
+    css: qmd.css
+editor_options: 
+  chunk_output_type: console
+---
+
+
+<!-- this code add line numbers to code blocks -->
+<!-- only works when code folding is not used in yaml (code_folding: show) -->
+
+```{=html}
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+```
+
+```{r set root directory, echo = FALSE}
+
+# set working directory as project directory or one directory above,
+rootdir <- try(rprojroot::find_rstudio_root_file(), silent = TRUE)
+if (is(rootdir, "try-error")) rootdir <-  ".."
+knitr::opts_knit$set(root.dir = rootdir)
+
+```
+
+```{r add link to github repo, echo = FALSE, results='asis'}
+
+# print link to github repo if any
+if (file.exists("./.git/config")){
+  config <- readLines("./.git/config")
+  url <- grep("url",  config, value = TRUE)
+  url <- gsub("\\turl = |.git$", "", url)
+  cat("\nSource code and data found at [", url, "](", url, ")", sep = "")
+  }
+
+```
+
+```{r setup style, echo = FALSE, message = FALSE, warning=FALSE}
+
+# options to customize chunk outputs
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors", # for code line numbers
+  tidy.opts = list(width.cutoff = 65), 
+  tidy = TRUE,
+  message = FALSE,
+  warning = FALSE
+ )
+
+```
+
+
+<!-- skyblue box -->
+<div class="alert alert-info">
+
+# Purpose {.unnumbered .unlisted}
+
+- Evaluate call structure variation related to the geographic 
+
+</div>
+
+&nbsp; 
+
+
+
+# Load packages {.unnumbered .unlisted}
+
+```{r load packages}
+
+# knitr is require for creating html/pdf/word reports
+# formatR is used for soft-wrapping code
+
+# install/ load packages
+sketchy::load_packages(packages = c("knitr", "formatR", "rprojroot", "sp", "rgdal", "rgeos", "dplyr", "raster", "dplyr", "spData", "vegan", "g(plot2", "pbapply", "viridis", "caret", github = "PhenotypeSpace", "brms", github = "brmsish", "ecodist"))
+
+source("./scripts/MRM2.R")
+
+```
+
+# Data analysis
+
+## Read data
+```{r}
+
+# Read in and convert the dataframe to Spatial Points object.
+sels <- read.csv("./data/raw/ReducedVocalDataYNA.csv", header = TRUE)
+
+sels$Latitude <- as.factor(sels$Latitude)
+sels$Longitude <- as.factor(sels$Longitude)
+
+sels$Latitude <- as.numeric(sels$Latitude)
+sels$Longitude <- as.numeric(sels$Longitude)
+
+sels <- sels[order(sels$Call_Type), ]
+
+sels$id <- 1
+for (i in 2:nrow(sels))
+  sels$id[i] <- if (sels$Call_Type[i] == sels$Call_Type[i - 1]) sels$id[i - 1] + 1 else 1
+
+sels$selsID <- paste(sels$Call_Type, sels$id, sep = "-") 
+
+xc <- readRDS("./data/processed/SPCC2016_2018_2019.RDS")
+xc <- as.data.frame(xc)
+
+rownames(xc) <- colnames(xc) <- sels$selsID
+```
+
+## Compute geographic distance
+```{r, eval = FALSE}
+
+# convert the dataframe to Spatial Points object.
+
+mat <- data.frame(lon = sels$Longitude, lat = sels$Latitude)
+str(mat)
+
+sp_pts <- SpatialPoints(mat, proj4string = CRS("+proj=longlat +ellps=GRS80 +no_defs +init:epsg31972"))
+
+# Reproject using EPSG codes
+# EPSG codes are specific to regions across the world. Codes can be accessed at the following site: http://epsg.io or by searching for other EPSG repositories online.
+epsg <- rgdal::make_EPSG()
+epsg[grep("^31972$", epsg$code), ]
+
+sp_pts <- sp::spTransform(sp_pts, CRSobj = CRS(epsg$prj4[grep("^31972$", epsg$code)]))
+bbox(sp_pts)
+proj4string(sp_pts)
+
+# Calculate the pairwise distances
+geo_dists <- rgeos::gDistance(sp_pts, byid = TRUE)
+
+
+
+rownames(geo_dists) <- colnames(geo_dists) <- sels$selsID
+str(geo_dists)
+
+saveRDS(geo_dists, "./data/processed/pairwise_distances.RDS")
+```
+
+## Mantel correlogram
+
+Average interpolated distances from correlograms at 25, 50, 100, 150, 200 and 250 km
+
+### Compute mantel correlogram at different distances
+```{r, eval = FALSE}
+geo_dists <- readRDS("./data/processed/pairwise_distances.RDS")
+# View("geo_dists")
+
+# Projection is in meters, so we convert to km
+geo_dists <- round(geo_dists/1000)
+
+# When we plot our data, we want the points to be connected in one continuous line. In order to achieve that, we identified "breaks" in distances using the following code. Break intervals are measured in km, and once a break limit was chosen we checked the number of existing 0's by creating a table of the classes. If a 0 shows in one of the classes, that class has no data and the break number should be altered. Although not essential, minimizing zeros maintains continuity in the plotted line for the graphic.
+geo_vect <- geo_dists[lower.tri(geo_dists)]
+geo_vect <- geo_vect[geo_vect != 1 & !is.na(geo_vect)]
+
+# read cross-correlation data
+xc <- readRDS("./data/processed/SPCC2016_2018_2019.RDS")
+
+xc_dist <- 1- xc
+
+dists <- c(25, 50, 100, 150, 200, 250)
+
+mantel_list <- pblapply(dists, cl = 18, function(i){
+    
+     classes <- seq(0, max(geo_dists), i)
+    # length(classes)
+    
+    # Run a mantel correlation on the data
+    correl_SPCC <- vegan::mantel.correlog(D.eco = xc_dist, D.geo = geo_dists, break.pts = classes, cutoff = FALSE, r.type = "pearson", nperm = 1, mult = "holm", progressive = TRUE)
+    
+    
+    mantel.res <- correl_SPCC$mantel.res[, 1:3]
+    mantel.res <- cbind(mantel.res, break.size = i)
+    
+    return(mantel.res)
+    
+})
+
+mantel_list <- lapply(mantel_list, as.data.frame)
+
+# # Save the correlation as an .RDS file so you don't have to run it multiple times in the future
+saveRDS(mantel_list, paste0("./data/processed/correl_SPCC_several_distances.RDS"))
+
+```
+
+### Plot mean correlogram
+```{r, eval = TRUE}
+
+mantel_list <- readRDS(paste0("./data/processed/correl_SPCC_several_distances.RDS"))
+
+mantels_df <- as.data.frame(do.call(rbind, mantel_list))
+
+combined_dists <- sort(unique(mantels_df$class.index))
+
+# interpolate
+interpol_mantel_list <- pblapply(mantel_list, function(x){
+    
+    appx <- approx(x = x$class.index[x$n.dist > 0], y = x$Mantel.cor[x$n.dist > 0],
+                xout = combined_dists,
+                 method = "linear")
+
+    return(appx$y)
+})
+
+
+interpol_mantel_mat <- do.call(cbind, interpol_mantel_list)
+
+
+interpol_mantel_df <- data.frame(combined_dists, 
+                                  mean.cor = apply(interpol_mantel_mat, 1, mean, na.rm = TRUE),
+                                  sd.cor = apply(interpol_mantel_mat, 1, sd, na.rm = TRUE))
+
+
+ggplot(data = interpol_mantel_df, mapping = aes(x = combined_dists, y = mean.cor)) +
+     geom_ribbon(data = interpol_mantel_df,
+    aes(ymin = mean.cor- sd.cor, ymax = mean.cor + sd.cor), fill = "gray", alpha = 0.3) +
+    geom_point(col = viridis(10, alpha = 0.5)[7], size = 2.5) +
+    geom_line(col = viridis(10, alpha = 0.5)[7], size = 2) +
+    xlim(c(0, 1000)) + ylim(c(-0.025, 0.2)) +
+    geom_point(size = 3, color = "transparent") + theme_classic(base_size = 20) +
+    labs(x = "Pairwise geographic distance (km)", y = "Correlation coefficient")
+
+```
+
+
+## Association between distance call similarity, geographic distance and dialect membership
+
+- Using the function ecodist::MRM() [https://search.r-project.org/CRAN/refmans/ecodist/html/MRM.html](https://search.r-project.org/CRAN/refmans/ecodist/html/MRM.html)
+- Dialect membership expressed as binary matrix (0 = same dialect, 1 = different dialect)
+- Geographic distance expressed in 100 km units
+- Effect size expressed as acoustic similarity (changes in cross-correlation coefficients)
+
+```{r, eval = TRUE}
+
+geo_dists <- readRDS("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/data/processed/pairwise_distances.RDS")
+sels <- read.csv("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/data/raw/ReducedVocalDataYNA.csv", header = TRUE)
+xc <- readRDS("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/data/processed/SPCC2016_2018_2019.RDS")
+
+
+geo_dists <- as.dist(geo_dists)
+call_member_binary <- as.dist(PhenotypeSpace::binary_triangular_matrix(group = sels$Call_Type))
+
+rect_var <- cbind(as.dist(xc), geo_dists, call_member_binary)
+rect_var <- cbind(rect_var, rect_var[,2] * rect_var[,3])
+
+# convert to 100 km unit
+rect_var[,2] <- rect_var[,2]/100000
+
+rect_var <- cbind(rect_var, residuals(lm(geo_dists ~ call_member_binary, as.data.frame(rect_var))))
+
+colnames(rect_var) <- c("acous_sim", "geo_dists", "call_member_binary", "intr", "geo_dist_resid")
+
+nperm <- 1000
+
+# mod <- MRM2(formula = acous_sim ~ geo_dists + call_member_binary, nperm = nperm, mat = rect_var[, c("acous_sim", "geo_dists", "call_member_binary")])
+# 
+# saveRDS(mod, "./data/processed/matrix_correlation_distance_vs_acoustic similarity.RDS")
+
+rect_var_df <- as.data.frame(rect_var)
+rect_var_df$membership <- ifelse(call_member_binary == 0, "same", "different")
+
+gg_acous <- ggplot(rect_var_df, aes(x = geo_dists, y= acous_sim, color = membership)) +
+    geom_point() +
+    scale_color_viridis_d(alpha = 0.3, begin = 0.2, end = 0.8) +
+    geom_smooth(method = "lm") +
+    theme_classic()
+
+gg_acous
+# ggsave(gg_acous, "./output/acoustic_similarity_vs_distance.jpeg")
+```
+
+
+```{r, eval = TRUE}
+
+mod <- readRDS("./data/processed/matrix_correlation_distance_vs_acoustic similarity.RDS")
+
+mod
+
+```
+
+
+```{r DEPRECATED, eval = FALSE}
+# 
+# # Read in .RDS file if you've already saved one
+correl <- readRDS("./data/processed/correl_SPCC_100km.RDS")
+str(correl)
+
+# Create a dataframe from the mantel correlation matrix, remove any existing NA's in the p-values. Create a vector of significance values for the plot and match with  appropriate p-values in the dataframe.
+df1 <- as.data.frame(correl$mantel.res)
+df1 <- df1[!is.na(df1$`Pr(corrected)`), ]
+
+sig <- ifelse(df1$`Pr(corrected)` <= 0.05, "sig", "non-sig")
+
+p_val <- df1$`Pr(corrected)`
+
+distance <- df1$class.index
+
+corr <- df1$Mantel.cor
+
+sig_cat <- sig
+sig_cat[sig_cat == "sig" & corr < 0] <- "Lower"
+sig_cat[sig_cat == "sig" & corr > 0] <- "Higher"
+sig_cat[sig_cat == "non-sig"] <- "Neutral"
+unique(sig_cat)
+
+corr_df <- data.frame(distance = distance, corr = corr, p_val = p_val, sig = sig, sig_cat = sig_cat)
+corr_df$sig <- factor(corr_df$sig, levels = c("sig", "non-sig"))
+corr_df$sig_cat <- factor(corr_df$sig_cat, levels = c("Lower", "Neutral", "Higher"))
+
+# Adjust the x- and y-axis scales using ggplot: c(0, 15)
+# install.packages("scales")
+# install.packages("ggplot2")
+scales_x <- list(Central_America = scale_x_continuous(limits = c(0, 15), breaks = seq(0, 15, 5), labels = seq(0, 15, 5)))
+
+scales_y <- list(SPCC = scale_y_continuous(limits = c(-0.5, 0.5)))
+
+str(corr_df)
+
+# Plot the spatial autocorrelogram using ggplot
+# jpeg("Spatial_auto100km.tiff", units="in", width=10, height=10, res=300) this never works
+ggplot(corr_df, aes(x = distance, y = corr)) +
+  geom_hline(yintercept = 0, linetype = "dotted", size = 0.5) +
+  geom_point(aes(color = sig_cat, fill = sig_cat), size = 4, shape = 21) +
+  scale_color_manual(values = c(alpha("darkblue", 0.6), gray.colors(12)[6], "red")) +
+  scale_fill_manual(values = c(alpha("darkblue", 0.6), gray.colors(12)[6], "red")) +
+  geom_line(colour = "black", size = 0.25) +
+  theme_bw() +
+  theme(panel.background = element_rect(color = "white", fill = "white"),
+        panel.grid.major.x = element_line(size = 0.1, color = "black"), 
+        axis.line = element_line(color = "black", size = 0.35), 
+        axis.text.x = element_text(size = 15, angle = 0, face = "bold"),
+        axis.text.y = element_text(size = 15, angle = 0, face = "bold"),
+        axis.title = element_text(size = 20), 
+        axis.ticks = element_line(size = 0.15), 
+        legend.text = element_text(hjust = 0, size = 18), 
+        legend.title = element_text(hjust = 0, size = 18), 
+        panel.grid.major.y = element_blank(), 
+        panel.grid.minor.y = element_blank(), 
+        legend.position = "top", 
+        strip.text = element_text(size = 10)) +
+  xlab("Pairwise Geographic Distance (km)") + 
+  ylab("Mantel Spatial Correlation of Acoustic Similarity") + 
+  guides(fill = guide_legend(title = "Spatial Correlation Values"), color = guide_legend(title = "Spatial Correlation Values"))
+
+dev.off()
+
+```
+
+
+```{r DEPRECATED 2, eval = FALSE}
+
+count_call <- table(sels$Call_Type)
+
+sels <- sels[order(match(sels$Call_Type, names(count_call)[order(count_call)])), ]
+
+combs <- t(combn(sels$selsID, m = 2))
+# combs <- combs[sapply(strsplit(combs[,1], "-"), "[", 1) != sapply(strsplit(combs[,2], "-"), "[", 1), ]
+
+nrow(combs)
+
+combs <- combs[!duplicated(combs[,2]), ]
+# diff_combs <- diff_combs[!duplicated(diff_combs[,2]), ]
+
+# 
+# keep <- TRUE
+# for(x in 2:nrow(combs)){
+#     prev <- unique(c(combs[seq_len(x - 1), , drop = FALSE][keep, ]))
+#        keep[x] <- !any(combs[x, ] %in% prev)
+#     }
+# 
+# combs <- combs[keep, ]
+
+combs <- data.frame(combs)
+
+geo_dists <- readRDS("./data/processed/pairwise_distances.RDS")
+
+combs$geo_dist <- sapply(1:nrow(combs), function(x) {
+    
+    geo_dists[rownames(geo_dists) == combs[x, 1], colnames(geo_dists) == combs[x, 2]]
+   
+})
+
+combs$call_dist <- sapply(1:nrow(combs), function(x) {
+    
+    xc[rownames(xc) == combs[x, 1], colnames(xc) == combs[x, 2]]
+   
+})
+
+range(combs$call_dist)
+
+combs$call_dist <- 1 - combs$call_dist
+
+names(combs) <- c("call.type1", "call.type2", "geo.dist", "acoustic.dist")
+```
+
+<!-- '&nbsp;' adds blank space -->
+
+
+
+<!-- light green box -->
+
+<div class="alert alert-success">
+
+# Takeaways {.unnumbered .unlisted}
+
+- Changes in acoustic similarity largely due to dialects: calls from the same dialect are way more similar
+- There is also a small positive effect of geoprahic distance on acoustic similarity: calls further away are slightly more similar
+
+</div>
+
+&nbsp;
+
+<!-- '---' adds a gray vertical line -->
+
+---
+
+&nbsp; 
+ 
+ <!-- add packages used, system details and versions  -->
+ 
+# Session information {.unnumbered .unlisted}
+
+```{r session info, echo=F}
+
+sessionInfo()
+
+```
