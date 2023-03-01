@@ -71,7 +71,7 @@ knitr::opts_chunk$set(
 
 # Purpose {.unnumbered .unlisted}
 
-- Evaluate call structure variation related to the geographic 
+- Evaluate call structure variation and ist relation to the geographic distanc
 
 </div>
 
