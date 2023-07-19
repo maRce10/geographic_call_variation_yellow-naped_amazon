@@ -198,7 +198,7 @@ saveRDS(mantel_list, paste0("./data/processed/correl_SPCC_several_distances.RDS"
 ```
 
 ### Plot mean correlogram
-```{r, eval = F}
+```{r, eval = TRUE}
 
 mantel_list <- readRDS(paste0("./data/processed/correl_SPCC_several_distances.RDS"))
 
@@ -234,14 +234,21 @@ ggplot(data = interpol_mantel_df, mapping = aes(x = combined_dists, y = mean.cor
     geom_point(size = 3, color = "transparent") + theme_classic(base_size = 20) +
     labs(x = "Pairwise geographic distance (km)", y = "Correlation coefficient")
 
+
+ggsave("./output/interpolated_mantel_correlogram.png", dpi = 300)
 ```
 
 
-# Simulate data with different patterns of geographic variation in call structure
+# Simulation 
+
+## Simulate data with different patterns of geographic variation in call structure
 
 - 26 localities (10 individuals each) along a longitudinal range
+- Simulated patterns following [Podos & Warren (2007)](https://d1wqtxts1xzle7.cloudfront.net/53993414/The_Evolution_of_Geographic_Variation_in20170727-7403-7je2az-libre.pdf?1501183774=&response-content-disposition=inline%3B+filename%3DThe_Evolution_of_Geographic_Variation_in.pdf&Expires=1689718560&Signature=c9HxG2TqaqonkjDKlotzx1jrLJl25sX1V2Jj0DpDFTtDNsSi7ykNv~Ii4XFFe-yEh4fUF6HX0MYzT9ImbUJykmwIJXumf8VELyHp5tj5QYjR9FmpCftHXf1JdwBh-vCm2zaQ2VOh~iaHcMqTqjnDQR1W3FMQDU1dVeduLpkSma~8eLQ15e-SAHPYVwvSu-R1a2Q9KDibQyq84MbEFbLgbz9T3eBxZpsUAnxrGUrlHWo9CtbBEMtORbh9id4KG-RaAVyA38v4FtS8qofXX9zpcZNQILVGkhIwXeCbYkRVBbC9w5OieTVvIUQBXxEwZltgQ~ZWzbkzI1~wmHRnkbhYzQ__&Key-Pair-Id=APKAJLOHF5GGSLRBV4ZA)
 
-```{r, fig.cap="Geographic location of individuals/localities in the simulated data set. Letters highlight locality ids"}
+![Figure from Podos & Warren (2007)](podos_warren_fig_3.png)
+
+```{r, fig.cap="Geographic location of individuals/localities in the simulated data set. Letters highlight locality ids", out.width="%100"}
 # seed to make it reproducible
 set.seed(123)
 
@@ -265,12 +272,15 @@ data <- data.frame(locality = rep(localities, each = n_indiv), lat, lon, color =
 plot(data[, c("lon", "lat")], col = data$color, pch = 20, cex = 1.8, ylim = range(data$lat) + c(-.2, .2))
 text(x = tapply(data$lon, data$locality, mean), y = rep(0.3, n_locality), labels = localities, cex = 2.5)
 
+abline(v= 1:30 - 0.5)
+
 ```
 
 ## Simulate acoustic variation:
 
 - Clinal: acoustic structure vector increases with longitude
 - Dialect-type: acoustic structure vector similar within a locality but varies randomly between neighnoring localities
+- Dialect-clinal: Combined clinal and dialect variation, dialect that vary with a geographic trend
 - Random: acoustic structure vector varies randomly between individuals regardless of locality or longitude
 
 ```{r, fig.cap="Types of vocal geographic variation that were simulated", fig.height=10}
@@ -296,21 +306,29 @@ data <- data[order(data$lon), ]
 # plot 
 par(mfrow = c(4, 1))
 
-# clinal
-plot(seq_len(nrow(data)), data$clinal, type= "l", main = "Clinal", xlab = "Longitude", ylab = "Call structure")
-
-# dialect
-plot(seq_len(nrow(data)), data$dialect, type= "l", main = "Dialect", xlab = "Longitude", ylab = "Call structure")
-
-# dialect
-plot(seq_len(nrow(data)), data$dialect_clinal, type= "l", main = "Dialect * Clinal", xlab = "Longitude", ylab = "Call structure")
-
 # random
-plot(seq_len(nrow(data)), data$random, type= "l", main = "Random", xlab = "Longitude", ylab = "Call structure")
+plot(seq_len(nrow(data)), data$random, type= "l", main = "Random", xlab = "Longitude", ylab = "Call structure", col = "#3E4A89FF", lwd = 2)
+
+# dialect
+plot(seq_len(nrow(data)), data$dialect, type= "l", main = "Dialect", xlab = "Longitude", ylab = "Call structure", col = "#3E4A89FF", lwd = 2)
+
+# dialect clinal
+plot(seq_len(nrow(data)), data$dialect_clinal, type= "l", main = "Dialect * Clinal", xlab = "Longitude", ylab = "Call structure", col = "#3E4A89FF", lwd = 2)
+
+# clinal
+plot(seq_len(nrow(data)), data$clinal, type= "l", main = "Clinal", xlab = "Longitude", ylab = "Call structure", col = "#3E4A89FF", lwd = 2)
+
+
+
 
 ```
 
 ## Stats on simulated data
+
+ - Model:   
+ \begin{align*}
+ Acoustic\ dissimilarity &\sim locality + geographic\ distance
+ \end{align*}
 
 Predict acoustic structure based on geographic distance and locality membership using multiple Regression on distance matrices
 
@@ -579,9 +597,16 @@ ggplot(estimates, aes(x = predictor, y = model, fill = rel_coef)) +
 &nbsp;
 
 <!-- '---' adds a gray vertical line -->
+
+# Real data analysis
+
 ## Association between distance call similarity, geographic distance and dialect membership
 
 - Using the function ecodist::MRM() [https://search.r-project.org/CRAN/refmans/ecodist/html/MRM.html](https://search.r-project.org/CRAN/refmans/ecodist/html/MRM.html)
+    - Model:   
+ \begin{align*}
+ Acoustic\ dissimilarity &\sim locality + geographic\ distance
+ \end{align*}
 - Dialect membership expressed as binary matrix (0 = same dialect, 1 = different dialect)
 - Geographic distance expressed in 100 km units
 - Effect size expressed as acoustic similarity (changes in cross-correlation coefficients)
