@@ -87,7 +87,7 @@ knitr::opts_chunk$set(
 # formatR is used for soft-wrapping code
 
 # install/ load packages
-sketchy::load_packages(packages = c("knitr", "formatR", "rprojroot", "sp", "rgdal", "rgeos", "dplyr", "raster", "dplyr", "spData", "vegan", "ggplot2", "pbapply", "viridis", "caret", github = "PhenotypeSpace", "brms", github = "brmsish", "ecodist"))
+sketchy::load_packages(packages = c("knitr", "formatR", "rprojroot", "sp", "rgdal", "rgeos", "dplyr", "raster", "dplyr", "spData", "vegan", "ggplot2", "pbapply", "viridis", "caret", github = "PhenotypeSpace", "brms", github = "brmsish", "ecodist", "pbapply"))
 
 source("./scripts/MRM2.R")
 
@@ -249,24 +249,33 @@ ggsave("./output/interpolated_mantel_correlogram.png", dpi = 300)
 ![Figure from Podos & Warren (2007)](podos_warren_fig_3.png)
 
 ```{r, fig.cap="Geographic location of individuals/localities in the simulated data set. Letters highlight locality ids", out.width="%100"}
+
+# read true data
+sels <- read.csv("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/data/raw/ReducedVocalDataYNA.csv", header = TRUE)
+
 # seed to make it reproducible
 set.seed(123)
 
 # number of groups
-n_locality <- 20
+n_locality <- length(unique(sels$Call_Type))
 
 # number of individuals per group
-n_indiv <- 10
-
-# simulate geographic coordinates along a gradient
-lon <- rep(1:n_locality, each = n_indiv) + rnorm(n = n_indiv * n_locality, sd = 0.1)
-lat <-  rnorm(n = n_indiv * n_locality, sd = 0.1)
+n_indiv <- sample(table(sels$Call_Type))
 
 # create locality labels
 localities <- sample(LETTERS[1:n_locality])
 
+# simulated individuals per group
+locality_label <- unlist(sapply(1:length(localities), function(x) rep(localities[x], each = n_indiv[x])))
+
+# simulate geographic coordinates along a gradient
+lon <-  unlist(sapply(1:n_locality, function(x) rep(x, each = n_indiv[x]))) + rnorm(n = length(locality_label), sd = 0.1)
+lat <-  rnorm(n = length(locality_label), sd = 0.1)
+
+# locality_label <- localities[n_indivs] 
+
 # put all together in a data frame
-data <- data.frame(locality = rep(localities, each = n_indiv), lat, lon, color = viridis(n_locality)[rep(1:n_locality, each = n_indiv)])
+data <- data.frame(locality = locality_label, lat, lon, color = viridis(n_locality)[as.numeric(as.factor(locality_label))])
 
 # plot localities along longitude
 plot(data[, c("lon", "lat")], col = data$color, pch = 20, cex = 1.8, ylim = range(data$lat) + c(-.2, .2))
@@ -283,7 +292,7 @@ abline(v= 1:30 - 0.5)
 - Dialect-clinal: Combined clinal and dialect variation, dialect that vary with a geographic trend
 - Random: acoustic structure vector varies randomly between individuals regardless of locality or longitude
 
-```{r, fig.cap="Types of vocal geographic variation that were simulated", fig.height=10}
+```{r, fig.cap="Types of vocal geographic variation that were simulated", out.height="100%"}
 # seed to make it reproducible
 set.seed(123)
 
@@ -292,7 +301,7 @@ set.seed(123)
 data$clinal <- data$lon + rnorm(n = nrow(data), sd = 0.2)
 
 # dialect type variation
-data$dialect <- as.numeric(as.factor(data$locality)) + rnorm(n = n_indiv * n_locality, sd = 0.2)
+data$dialect <- as.numeric(as.factor(data$locality)) + rnorm(n = nrow(data), sd = 0.2)
 
 
 data$dialect_clinal <- data$clinal * data$dialect
@@ -303,23 +312,18 @@ data$random <- rnorm(n = nrow(data), sd = 0.2)
 # sort so lines look good in plot 
 data <- data[order(data$lon), ]
 
-# plot 
-par(mfrow = c(4, 1))
+lng_data <- stack(data[, c("clinal", "dialect", "dialect_clinal", "random")])
 
-# random
-plot(seq_len(nrow(data)), data$random, type= "l", main = "Random", xlab = "Longitude", ylab = "Call structure", col = "#3E4A89FF", lwd = 2)
+lng_data$locality <- data$locality
+lng_data$lat <- data$lat
+lng_data$lat <- data$lon
+lng_data$lon_seq <- 1:nrow(data)
 
-# dialect
-plot(seq_len(nrow(data)), data$dialect, type= "l", main = "Dialect", xlab = "Longitude", ylab = "Call structure", col = "#3E4A89FF", lwd = 2)
-
-# dialect clinal
-plot(seq_len(nrow(data)), data$dialect_clinal, type= "l", main = "Dialect * Clinal", xlab = "Longitude", ylab = "Call structure", col = "#3E4A89FF", lwd = 2)
-
-# clinal
-plot(seq_len(nrow(data)), data$clinal, type= "l", main = "Clinal", xlab = "Longitude", ylab = "Call structure", col = "#3E4A89FF", lwd = 2)
-
-
-
+ggplot(lng_data, aes(x = lon_seq, y = values)) +
+    geom_line(color = "#3E4A89FF", size = 1.6) + 
+    facet_wrap(~ ind, scales = "free_y") +
+    theme_classic(base_size = 25) + 
+    labs(x = "Longitude", y = "Acoustic feature")
 
 ```
 
@@ -346,7 +350,7 @@ geo_dist <- dist(data[, c("lat", "lon")])
 
 # regression models
 # set data format
-rect_var <- cbind(clinal_dist = as.dist(scale(clinal_dist)), dialect_dist = as.dist(scale(dialect_dist)), dialect_clinal_dist = as.dist(scale(dialect_clinal_dist)), random_dist = as.dist(scale(random_dist)), geo_dist = as.dist(scale(geo_dist)), call_member_binary = as.dist(scale(call_member_binary)))
+rect_var <- cbind(clinal_dist = as.dist(scale(clinal_dist)), dialect_dist = as.dist(scale(dialect_dist)), dialect_clinal_dist = as.dist(scale(dialect_clinal_dist)), random_dist = as.dist(scale(random_dist)), geo_dist = as.dist(scale(geo_dist)), call_member_binary = call_member_binary)
 
 apply(rect_var,2, var)
 
@@ -354,9 +358,10 @@ apply(rect_var,2, var)
 
 ### Dialect-type variation model
 ```{r}
+nperm <- 100
 
 # model predicting dialect variation
-(mod_dialect <- MRM2(formula = dialect_dist ~ geo_dist + call_member_binary, nperm = 1000, mat = rect_var[, c("dialect_dist", "geo_dist", "call_member_binary")]))
+(mod_dialect <- MRM2(formula = dialect_dist ~ geo_dist + call_member_binary, nperm = nperm, mat = rect_var[, c("dialect_dist", "geo_dist", "call_member_binary")]))
 
 ```
 
@@ -364,7 +369,7 @@ apply(rect_var,2, var)
 ```{r}
 
 # model predicting clinal variation
-(mod_clinal <- MRM2(formula = clinal_dist ~ geo_dist + call_member_binary, nperm = 1000, mat = rect_var[, c("clinal_dist", "geo_dist", "call_member_binary")]))
+(mod_clinal <- MRM2(formula = clinal_dist ~ geo_dist + call_member_binary, nperm = nperm, mat = rect_var[, c("clinal_dist", "geo_dist", "call_member_binary")]))
 
 ```
 
@@ -373,7 +378,7 @@ apply(rect_var,2, var)
 ```{r}
 
 # model predicting clinal variation
-(mod_dialect_clinal <- MRM2(formula = dialect_clinal_dist ~ geo_dist + call_member_binary, nperm = 1000, mat = rect_var[, c("dialect_clinal_dist", "geo_dist", "call_member_binary")]))
+(mod_dialect_clinal <- MRM2(formula = dialect_clinal_dist ~ geo_dist + call_member_binary, nperm = nperm, mat = rect_var[, c("dialect_clinal_dist", "geo_dist", "call_member_binary")]))
 
 ```
 
@@ -382,7 +387,7 @@ apply(rect_var,2, var)
 ```{r}
 
 # model predicting random variation
-(mod_random <- MRM2(formula = random_dist ~ geo_dist + call_member_binary, nperm = 1000, mat = rect_var[, c("random_dist", "geo_dist", "call_member_binary")]))
+(mod_random <- MRM2(formula = random_dist ~ geo_dist + call_member_binary, nperm = nperm, mat = rect_var[, c("random_dist", "geo_dist", "call_member_binary")]))
 
 ```
 
@@ -422,29 +427,34 @@ ggplot(estimates, aes(x = predictor, y = model, fill = rel_coef)) +
 
 ```{r, eval = FALSE}
 
-rep_models <- replicate(100, expr = {
+nperm <- 1000
+reps <- 100
+
+rep_models <- pbreplicate(reps, cl = 20, expr = {
     # number of groups
-    n_locality <- 20
+    n_locality <- length(unique(sels$Call_Type))
     
     # number of individuals per group
-    n_indiv <- 10
-    
-    # simulate geographic coordinates along a gradient
-    lon <-
-        rep(1:n_locality, each = n_indiv) + rnorm(n = n_indiv * n_locality, sd = 0.1)
-    lat <-  rnorm(n = n_indiv * n_locality, sd = 0.1)
+    n_indiv <- sample(table(sels$Call_Type))
     
     # create locality labels
     localities <- sample(LETTERS[1:n_locality])
     
+    # simulated individuals per group
+    locality_label <-
+        unlist(sapply(1:length(localities), function(x)
+            rep(localities[x], each = n_indiv[x])))
+    
+    # simulate geographic coordinates along a gradient
+    lon <-
+        unlist(sapply(1:n_locality, function(x)
+            rep(x, each = n_indiv[x]))) + rnorm(n = length(locality_label), sd = 0.1)
+    lat <-  rnorm(n = length(locality_label), sd = 0.1)
+    
+    # locality_label <- localities[n_indivs]
+    
     # put all together in a data frame
-    data <-
-        data.frame(
-            locality = rep(localities, each = n_indiv),
-            lat,
-            lon,
-            color = viridis(n_locality)[rep(1:n_locality, each = n_indiv)]
-        )
+    data <- data.frame(locality = locality_label, lat, lon)
     
     # simulate acoustic structure vector
     # clinal variation
@@ -452,16 +462,13 @@ rep_models <- replicate(100, expr = {
     
     # dialect type variation
     data$dialect <-
-        as.numeric(as.factor(data$locality)) + rnorm(n = n_indiv * n_locality, sd = 0.2)
+        as.numeric(as.factor(data$locality)) + rnorm(n = nrow(data), sd = 0.2)
     
     
     data$dialect_clinal <- data$clinal * data$dialect
     
     # random variation
     data$random <- rnorm(n = nrow(data), sd = 0.2)
-    
-    # sort so lines look good in plot
-    data <- data[order(data$lon),]
     
     # create distance matrices
     call_member_binary <-
@@ -481,48 +488,42 @@ rep_models <- replicate(100, expr = {
             dialect_clinal_dist = as.dist(scale(dialect_clinal_dist)),
             random_dist = as.dist(scale(random_dist)),
             geo_dist = as.dist(scale(geo_dist)),
-            call_member_binary = as.dist(scale(call_member_binary))
+            call_member_binary = call_member_binary
         )
     
     # model predicting dialect variation
-    (
-        mod_dialect <-
-            MRM2(
-                formula = dialect_dist ~ geo_dist + call_member_binary,
-                nperm = 1000,
-                mat = rect_var[, c("dialect_dist", "geo_dist", "call_member_binary")]
-            )
-    )
+    mod_dialect <-
+        MRM2(
+            formula = dialect_dist ~ geo_dist + call_member_binary,
+            nperm = nperm,
+            mat = rect_var[, c("dialect_dist", "geo_dist", "call_member_binary")]
+        )
+    
     
     # model predicting clinal variation
-    (
-        mod_clinal <-
-            MRM2(
-                formula = clinal_dist ~ geo_dist + call_member_binary,
-                nperm = 1000,
-                mat = rect_var[, c("clinal_dist", "geo_dist", "call_member_binary")]
-            )
-    )
+    mod_clinal <-
+        MRM2(
+            formula = clinal_dist ~ geo_dist + call_member_binary,
+            nperm = nperm,
+            mat = rect_var[, c("clinal_dist", "geo_dist", "call_member_binary")]
+        )
     
     # model predicting clinal variation
-    (
-        mod_dialect_clinal <-
-            MRM2(
-                formula = dialect_clinal_dist ~ geo_dist + call_member_binary,
-                nperm = 1000,
-                mat = rect_var[, c("dialect_clinal_dist", "geo_dist", "call_member_binary")]
-            )
-    )
+    mod_dialect_clinal <-
+        MRM2(
+            formula = dialect_clinal_dist ~ geo_dist + call_member_binary,
+            nperm = nperm,
+            mat = rect_var[, c("dialect_clinal_dist", "geo_dist", "call_member_binary")]
+        )
     
     # model predicting random variation
-    (
-        mod_random <-
-            MRM2(
-                formula = random_dist ~ geo_dist + call_member_binary,
-                nperm = 1000,
-                mat = rect_var[, c("random_dist", "geo_dist", "call_member_binary")]
-            )
-    )
+    mod_random <-
+        MRM2(
+            formula = random_dist ~ geo_dist + call_member_binary,
+            nperm = nperm,
+            mat = rect_var[, c("random_dist", "geo_dist", "call_member_binary")]
+        )
+    
     
     mods <-
         list(
@@ -532,16 +533,18 @@ rep_models <- replicate(100, expr = {
             mod_random = mod_random
         )
     
-    names(mods) <- c("Clinal", "Dialect", "Dialect * clinal", "Random")
+    names(mods) <-
+        c("Clinal", "Dialect", "Dialect * clinal", "Random")
     
-    estimates <- do.call(rbind, lapply(seq_along(mods), function(x) {
-        Y <- data.frame(mods[[x]]$coef[-1,])
-        Y$rel_coef <- Y[, 1] / max(Y[, 1])
-        Y$mod <- names(mods)[x]
-        Y$predictor <- rownames(Y)
-        names(Y) <- c("coef", "p", "rel_coef", "model", "predictor")
-        return(Y)
-    }))
+    estimates <-
+        do.call(rbind, lapply(seq_along(mods), function(x) {
+            Y <- data.frame(mods[[x]]$coef[-1, ])
+            Y$rel_coef <- Y[, 1] / max(Y[, 1])
+            Y$mod <- names(mods)[x]
+            Y$predictor <- rownames(Y)
+            names(Y) <- c("coef", "p", "rel_coef", "model", "predictor")
+            return(Y)
+        }))
     
     estimates
 }, simplify = FALSE)
@@ -553,14 +556,15 @@ ps <- do.call(cbind, lapply(rep_models, function(x)
 
 estimates <- rep_models[[1]]
 estimates$coef <- rowMeans(coeffs)
-estimates$p <- rowMeans(ps)
-estimates$rel_coef <- rowMeans(ps)
-
+estimates$sd <- apply(coeffs, 1, sd)
+estimates$p <- 1 - (apply(ps, 1, function(x) sum(x < 0.05)) / reps)
 estimates$rel_coef <- estimates[, 1] / max(estimates[, 1])
 estimates$rel_coef <- ifelse(estimates$p < 0.05, estimates$rel_coef,
                              0)
 estimates$signif <-
     ifelse(estimates$p < 0.05, "p < 0.05", "p >= 0.05")
+
+estimates$coef_sd <- paste0(round(estimates$coef, 3), "\n(", round(estimates$sd, 4), ")")
 
 saveRDS(estimates,
         "./data/processed/estimates_for_replicated_simulation_dialects.RDS")
@@ -568,14 +572,13 @@ saveRDS(estimates,
 ```
 
 
-```{r}
+```{r, fig.cap="Mean estimates (and SD) of replicated simulation regression results. P values "}
 
 estimates <- readRDS("./data/processed/estimates_for_replicated_simulation_dialects.RDS")
 
 ggplot(estimates, aes(x = predictor, y = model, fill = rel_coef)) +
     geom_tile() + coord_equal() + scale_fill_gradient2(low = viridis(10)[3],
-    high = viridis(10)[7], guide = "none") + geom_text(aes(label = round(coef,
-    3), color = signif)) + scale_color_manual(values = c("black",
+    high = viridis(10)[7], guide = "none") + geom_text(aes(label = coef_sd, color = signif)) + scale_color_manual(values = c("black",
     "gray")) + labs(x = "", y = "", color = "P value") + theme_classic() +
     theme(axis.text.x = element_text(color = "black", size = 11, angle = 30,
         vjust = 0.8, hjust = 0.8))
@@ -620,15 +623,14 @@ xc <- readRDS("~/Dropbox/Projects/geographic_call_variation_yellow-naped_amazon/
 geo_dists <- as.dist(geo_dists)
 call_member_binary <- as.dist(PhenotypeSpace::binary_triangular_matrix(group = sels$Call_Type))
 
-rect_var <- cbind(acous_sim = as.dist(scale(1- xc)), geo_dists = as.dist(scale(geo_dists)), call_member_binary = as.dist(scale(call_member_binary)))
-
+rect_var <- cbind(acous_sim = as.dist(scale(1- xc)), geo_dists = as.dist(scale(geo_dists)), call_member_binary = call_member_binary)
 
 colnames(rect_var) <- c("acous_distance", "geo_dists", "call_member_binary")
 
 
 # mod <- MRM2(formula = acous_distance ~ geo_dists + call_member_binary, nperm = 10000, mat = rect_var)
-# 
-# saveRDS(mod, "./data/processed/matrix_correlation_distance_vs_acoustic similarity.RDS")
+#  
+# saveRDS(mod, "./data/processed/matrix_correlation_distance_vs_acoustic_similarity.RDS")
 
 rect_var_df <- as.data.frame(rect_var)
 rect_var_df$membership <- ifelse(call_member_binary == 0, "same", "different")
@@ -646,7 +648,7 @@ gg_acous
 
 ```{r, eval = TRUE}
 
-mod <- readRDS("./data/processed/matrix_correlation_distance_vs_acoustic similarity.RDS")
+mod <- readRDS("./data/processed/matrix_correlation_distance_vs_acoustic_similarity.RDS")
 
 mod
 

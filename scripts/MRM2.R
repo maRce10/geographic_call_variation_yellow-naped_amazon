@@ -66,7 +66,7 @@ MRM2 <- function (formula = formula(data), data, mat, nperm = 1000, method = "li
                                                                abs(x[1])])/nperm)
         }
         results <- list(coef = cbind(b, pval = b.pval), r.squared = c(R2 = R2, 
-                                                                      pval = R2.pval), F.test = c(F = F, F.pval = F.pval))
+                                                                      pval = R2.pval), F.test = c(F = F, F.pval = F.pval),  n = (sqrt(8 * nrow(mat) + 1) + 1) / 2)
     } else {
         if (method == "logistic") {
             X <- m[, 2:ncol(m), drop = FALSE]
@@ -100,7 +100,8 @@ MRM2 <- function (formula = formula(data), data, mat, nperm = 1000, method = "li
             }
             results <- list(coef = cbind(b, pval = b.pval), 
                             dev = c(resid.dev = dev, resid.df = dev.df, 
-                                    dev.pval = dev.pval))
+                                    dev.pval = dev.pval),
+                            n = (sqrt(8 * nrow(mat) + 1) + 1) / 2)
         } else {
             stop("method must be 'linear' or 'logistic'\n")
         }
